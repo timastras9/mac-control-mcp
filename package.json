@@ -1,6 +1,6 @@
 {
   "name": "mac-control-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP server for full Mac control — browser, apps, system commands",
   "main": "server.js",
   "type": "module",

@@ -1,17 +1,24 @@
 # Mac Control MCP
 
-Full Mac control for Claude agents (Cowork / Claude Desktop). Browser automation with persistent login sessions, app launching, and shell commands — all through the Model Context Protocol.
+Full Mac control for Claude agents (Cowork / Claude Desktop). Browser automation with persistent login sessions, native desktop control, app launching, and shell commands — all through the Model Context Protocol.
 
 ## One-Line Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TimAstras/mac-control-mcp/Main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/timastras9/mac-control-mcp/Main/install.sh | bash
 ```
 
-Or clone and install manually:
+The installer handles everything:
+- Clones the repo and installs dependencies
+- Downloads Playwright Chromium
+- Configures Claude Desktop automatically
+- Walks you through macOS Accessibility permissions setup
+- Verifies everything works
+
+Or install manually:
 
 ```bash
-git clone https://github.com/TimAstras/mac-control-mcp.git ~/.mac-control-mcp
+git clone https://github.com/timastras9/mac-control-mcp.git ~/.mac-control-mcp
 cd ~/.mac-control-mcp
 npm install
 npx playwright install chromium
@@ -36,12 +43,22 @@ Restart Claude Desktop.
 
 - macOS
 - Node.js 18+
-- Google Chrome (falls back to bundled Chromium)
+- Google Chrome (optional — falls back to bundled Chromium)
 - Claude Desktop
 
-## Tools
+## Accessibility Permissions
 
-### Browser
+Some tools (keystroke, click_at, list_windows, get_active_app) require macOS Accessibility permissions. The installer sets this up automatically, but if you need to do it manually:
+
+1. Open **System Settings > Privacy & Security > Accessibility**
+2. Click **+** and press **Cmd+Shift+G**
+3. Type `/usr/bin/osascript` and hit Enter — select it and click Open
+4. Toggle it **ON**
+5. Repeat for your `node` binary (run `which node` to find the path)
+
+## Tools (22)
+
+### Browser (12)
 
 | Tool | Description |
 |------|-------------|
@@ -58,16 +75,31 @@ Restart Claude Desktop.
 | `browser_wait` | Wait for element to appear |
 | `browser_scroll` | Scroll up/down/top/bottom |
 
-### System
+### System (6)
 
 | Tool | Description |
 |------|-------------|
 | `open_app` | Open any Mac application by name |
 | `run_command` | Run shell commands, return output |
+| `read_screen` | Screenshot the entire Mac screen |
+| `notification` | Show a macOS notification |
+| `clipboard_read` | Read clipboard contents |
+| `clipboard_write` | Write text to clipboard |
+
+### Desktop Control (4) — requires Accessibility
+
+| Tool | Description |
+|------|-------------|
+| `keystroke` | Send keystrokes to any app (with modifiers) |
+| `click_at` | Click at screen x,y coordinates |
+| `get_active_app` | Get frontmost app name and window title |
+| `list_windows` | List all visible windows with position/size |
 
 ## How It Works
 
 Uses Playwright with a **persistent Chrome profile** at `~/.mac-control-mcp/browser-data/`. All your Google logins, cookies, and sessions are preserved — no re-authentication needed.
+
+Desktop control tools use macOS native `osascript` (AppleScript) for keystroke injection, coordinate clicking, and window enumeration.
 
 The `--disable-blink-features=AutomationControlled` flag prevents sites from detecting automation.
 

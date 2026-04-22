@@ -94,10 +94,28 @@ async function getPage() {
   return page;
 }
 
+// ═══ HELPERS ═══
+
+function escapeAppleScript(str) {
+  return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function getKeyCode(keyName) {
+  const codes = {
+    return: 36, tab: 48, escape: 53, space: 49, delete: 51,
+    up: 126, down: 125, left: 123, right: 124,
+    f1: 122, f2: 120, f3: 99, f4: 118, f5: 96, f6: 97,
+    f7: 98, f8: 100, f9: 101, f10: 109, f11: 103, f12: 111,
+    home: 115, end: 119, pageup: 116, pagedown: 121,
+    enter: 36, backspace: 51, forwarddelete: 117,
+  };
+  return codes[keyName.toLowerCase()] || 0;
+}
+
 // ═══ MCP SERVER ═══
 
 const server = new Server(
-  { name: "mac-control-mcp", version: "1.0.0" },
+  { name: "mac-control-mcp", version: "1.1.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -249,6 +267,82 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["command"],
       },
     },
+    {
+      name: "read_screen",
+      description: "Take a screenshot of the entire Mac screen (not just browser).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          display: { type: "number", description: "Display number (default 1, main screen)" },
+        },
+      },
+    },
+    {
+      name: "keystroke",
+      description: "Send keystrokes to the frontmost application via AppleScript. Requires Accessibility permission.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "Text to type" },
+          key: { type: "string", description: "Special key name (e.g. 'return', 'tab', 'escape', 'space', 'delete')" },
+          modifiers: { type: "array", items: { type: "string", enum: ["command", "shift", "option", "control"] }, description: "Modifier keys to hold" },
+          app: { type: "string", description: "Target application name (optional, uses frontmost if omitted)" },
+        },
+      },
+    },
+    {
+      name: "click_at",
+      description: "Click at specific screen coordinates. Requires Accessibility permission.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          x: { type: "number", description: "X coordinate" },
+          y: { type: "number", description: "Y coordinate" },
+          button: { type: "string", enum: ["left", "right"], description: "Mouse button (default left)" },
+          doubleClick: { type: "boolean", description: "Double-click (default false)" },
+        },
+        required: ["x", "y"],
+      },
+    },
+    {
+      name: "get_active_app",
+      description: "Get the name and window title of the frontmost application.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "list_windows",
+      description: "List all visible windows with their app name, title, position, and size.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "notification",
+      description: "Show a macOS notification.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Notification title" },
+          message: { type: "string", description: "Notification body text" },
+          sound: { type: "boolean", description: "Play sound (default true)" },
+        },
+        required: ["title", "message"],
+      },
+    },
+    {
+      name: "clipboard_read",
+      description: "Read the current contents of the Mac clipboard.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "clipboard_write",
+      description: "Write text to the Mac clipboard.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "Text to copy to clipboard" },
+        },
+        required: ["text"],
+      },
+    },
   ],
 }));
 
@@ -398,6 +492,122 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           maxBuffer: 1024 * 1024,
         });
         return result(output.substring(0, 10000));
+      }
+
+      case "read_screen": {
+        const path = join(SCREENSHOTS_DIR, `screen_${Date.now()}.png`);
+        const display = args.display || 1;
+        execSync(`screencapture -x -D ${display} "${path}"`, { timeout: 5000 });
+        const data = readFileSync(path).toString("base64");
+        return {
+          content: [
+            { type: "text", text: `Screen capture saved: ${path}` },
+            { type: "image", data, mimeType: "image/png" },
+          ],
+        };
+      }
+
+      case "keystroke": {
+        let script = "";
+        const target = args.app ? `application "${args.app}"` : "application (path to frontmost application as text)";
+
+        if (args.key) {
+          const mods = (args.modifiers || []).map(m => `${m} down`).join(", ");
+          const using = mods ? ` using {${mods}}` : "";
+          script = `tell ${target} to activate
+tell application "System Events" to key code ${getKeyCode(args.key)}${using}`;
+        } else if (args.text) {
+          if (args.modifiers && args.modifiers.length > 0) {
+            const mods = args.modifiers.map(m => `${m} down`).join(", ");
+            script = `tell ${target} to activate
+tell application "System Events" to keystroke "${escapeAppleScript(args.text)}" using {${mods}}`;
+          } else {
+            script = `tell ${target} to activate
+tell application "System Events" to keystroke "${escapeAppleScript(args.text)}"`;
+          }
+        } else {
+          return error("Provide either 'text' or 'key'");
+        }
+
+        execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 5000 });
+        return result(`Keystroke sent${args.app ? ` to ${args.app}` : ""}`);
+      }
+
+      case "click_at": {
+        const btn = args.button === "right" ? "right" : "left";
+        const clickCmd = args.doubleClick ? "double click" : "click";
+        const btnPart = btn === "right" ? " using secondary mouse button" : "";
+        const script = `tell application "System Events" to ${clickCmd} at {${args.x}, ${args.y}}${btnPart}`;
+        try {
+          execSync(`osascript -e '${script}'`, { timeout: 5000 });
+        } catch {
+          execSync(`cliclick ${btn === "right" ? "rc" : (args.doubleClick ? "dc" : "c")}:${args.x},${args.y}`, { timeout: 5000 });
+        }
+        return result(`Clicked at (${args.x}, ${args.y})`);
+      }
+
+      case "get_active_app": {
+        const appName = execSync(
+          `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`,
+          { encoding: "utf-8", timeout: 5000 }
+        ).trim();
+        let windowTitle = "";
+        try {
+          windowTitle = execSync(
+            `osascript -e 'tell application "System Events" to get title of front window of first application process whose frontmost is true'`,
+            { encoding: "utf-8", timeout: 5000 }
+          ).trim();
+        } catch {}
+        return result(JSON.stringify({ app: appName, window: windowTitle }));
+      }
+
+      case "list_windows": {
+        const script = `
+          set windowList to ""
+          tell application "System Events"
+            set allProcs to every application process whose visible is true
+            repeat with proc in allProcs
+              set procName to name of proc
+              try
+                set wins to every window of proc
+                repeat with w in wins
+                  set wTitle to title of w
+                  set wPos to position of w
+                  set wSize to size of w
+                  set windowList to windowList & procName & " | " & wTitle & " | " & (item 1 of wPos) & "," & (item 2 of wPos) & " | " & (item 1 of wSize) & "x" & (item 2 of wSize) & "\n"
+                end repeat
+              end try
+            end repeat
+          end tell
+          return windowList`;
+        const output = execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
+          encoding: "utf-8",
+          timeout: 10000,
+        }).trim();
+        const windows = output.split("\n").filter(Boolean).map(line => {
+          const [app, title, pos, size] = line.split(" | ");
+          const [x, y] = (pos || "0,0").split(",").map(Number);
+          const [w, h] = (size || "0x0").split("x").map(Number);
+          return { app, title, x, y, width: w, height: h };
+        });
+        return result(JSON.stringify(windows, null, 2));
+      }
+
+      case "notification": {
+        const sound = args.sound !== false ? 'sound name "default"' : "";
+        const script = `display notification "${escapeAppleScript(args.message)}" with title "${escapeAppleScript(args.title)}" ${sound}`;
+        execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 5000 });
+        return result(`Notification sent: ${args.title}`);
+      }
+
+      case "clipboard_read": {
+        const text = execSync("pbpaste", { encoding: "utf-8", timeout: 5000 });
+        return result(text.substring(0, 10000));
+      }
+
+      case "clipboard_write": {
+        execSync(`echo "${args.text.replace(/"/g, '\\"')}" | pbcopy`, { timeout: 5000 });
+        return result(`Copied ${args.text.length} chars to clipboard`);
       }
 
       default:
