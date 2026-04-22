@@ -1,0 +1,19 @@
+{
+  "name": "mac-control-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for full Mac control — browser, apps, system commands",
+  "main": "server.js",
+  "type": "module",
+  "bin": {
+    "mac-control-mcp": "./server.js"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "NSI Corp",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "playwright": "^1.59.1"
+  }
+}
